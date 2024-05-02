@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# This file contains code fragments from 
+# This file contains code fragments from
 #
 #     ../ctc_bpe_models.py
 #     ../ctc_models.py
@@ -52,7 +52,11 @@ from nemo.collections.asr.losses.ctc import CTCLoss
 from nemo.collections.asr.metrics.wer import WER
 from nemo.collections.asr.metrics.wer_bpe import WERBPE
 from nemo.collections.asr.models.asr_model import ASRModel
-from nemo.collections.asr.parts.perturb import process_augmentations, RandomNoisePerturbation, AudioAugmentor
+from nemo.collections.asr.parts.perturb import (
+    process_augmentations,
+    RandomNoisePerturbation,
+    AudioAugmentor,
+)
 from nemo.utils import logging
 
 
@@ -64,13 +68,16 @@ class CTCFinetuneModel(ASRModel):
         self.world_size = 1
         self.local_rank = 0
         if trainer is not None:
-            self.global_rank = (trainer.node_rank * trainer.num_gpus) + trainer.local_rank
+            self.global_rank = (
+                trainer.node_rank * trainer.num_gpus
+            ) + trainer.local_rank
             self.world_size = trainer.num_nodes * trainer.num_gpus
             self.local_rank = trainer.local_rank
 
         self.use_bpe = cfg.tokenizer is not None
         if self.use_bpe:
             from nemo.collections.asr.parts.mixins import ASRBPEMixin
+
             self.bpe = ASRBPEMixin()
             self.bpe._setup_tokenizer(cfg.tokenizer, register_artifact=False)
             self.tokenizer = self.bpe.tokenizer
@@ -86,15 +93,21 @@ class CTCFinetuneModel(ASRModel):
 
         super().__init__(cfg=cfg, trainer=trainer)
 
-        assert self._cfg.encoder_type == 'st'
+        assert self._cfg.encoder_type == "st"
         from nemo.collections.asr.models.st2vec.st2vec_model import ST2VecEncoder
+
         self.encoder = ST2VecEncoder(self._cfg.encoder)
-        encoder_param_prefix = 'st2vec_encoder.'
+        encoder_param_prefix = "st2vec_encoder."
 
         if cfg.pretrain_chkpt_path is not None:
-            CTCFinetuneModel.init_encoder_from_pretrain_model(self.encoder, encoder_param_prefix, cfg.pretrain_chkpt_path)
-        if self._cfg.encoder_type == 'st':
-            self.encoder.remove_pretraining_modules(use_teacher_encoder=self._cfg.use_teacher_encoder)
+            # NOTE: INIT ENCODER FROM STUDENT
+            CTCFinetuneModel.init_encoder_from_pretrain_model(
+                self.encoder, encoder_param_prefix, cfg.pretrain_chkpt_path
+            )
+        if self._cfg.encoder_type == "st":
+            self.encoder.remove_pretraining_modules(
+                use_teacher_encoder=self._cfg.use_teacher_encoder
+            )
         else:
             self.encoder.remove_pretraining_modules()
 
@@ -114,7 +127,7 @@ class CTCFinetuneModel(ASRModel):
                 tokenizer=self.tokenizer,
                 blank_id=self.decoder.blank_idx,
                 batch_dim_index=0,
-                use_cer=self._cfg.get('use_cer', False),
+                use_cer=self._cfg.get("use_cer", False),
                 ctc_decode=True,
                 dist_sync_on_step=True,
                 log_prediction=self._cfg.get("log_prediction", False),
@@ -124,7 +137,7 @@ class CTCFinetuneModel(ASRModel):
                 vocabulary=self.decoder.vocabulary,
                 blank_id=self.decoder.blank_idx,
                 batch_dim_index=0,
-                use_cer=self._cfg.get('use_cer', False),
+                use_cer=self._cfg.get("use_cer", False),
                 ctc_decode=True,
                 dist_sync_on_step=True,
                 log_prediction=self._cfg.get("log_prediction", False),
@@ -133,7 +146,11 @@ class CTCFinetuneModel(ASRModel):
 
     @torch.no_grad()
     def transcribe(
-        self, paths2audio_files: List[str], batch_size: int = 4, logprobs=False, return_hypotheses: bool = False
+        self,
+        paths2audio_files: List[str],
+        batch_size: int = 4,
+        logprobs=False,
+        return_hypotheses: bool = False,
     ) -> List[str]:
         """
         Uses greedy decoding to transcribe audio files. Use this method for debugging and prototyping.
@@ -180,17 +197,26 @@ class CTCFinetuneModel(ASRModel):
             logging.set_verbosity(logging.WARNING)
             # Work in tmp directory - will store manifest file there
             with tempfile.TemporaryDirectory() as tmpdir:
-                with open(os.path.join(tmpdir, 'manifest.json'), 'w') as fp:
+                with open(os.path.join(tmpdir, "manifest.json"), "w") as fp:
                     for audio_file in paths2audio_files:
-                        entry = {'audio_filepath': audio_file, 'duration': 100000, 'text': 'nothing'}
-                        fp.write(json.dumps(entry) + '\n')
+                        entry = {
+                            "audio_filepath": audio_file,
+                            "duration": 100000,
+                            "text": "nothing",
+                        }
+                        fp.write(json.dumps(entry) + "\n")
 
-                config = {'paths2audio_files': paths2audio_files, 'batch_size': batch_size, 'temp_dir': tmpdir}
+                config = {
+                    "paths2audio_files": paths2audio_files,
+                    "batch_size": batch_size,
+                    "temp_dir": tmpdir,
+                }
 
                 temporary_datalayer = self._setup_transcribe_dataloader(config)
                 for test_batch in tqdm(temporary_datalayer, desc="Transcribing"):
                     logits, logits_len, greedy_predictions = self.forward(
-                        input_signal=test_batch[0].to(device), input_signal_length=test_batch[1].to(device)
+                        input_signal=test_batch[0].to(device),
+                        input_signal_length=test_batch[1].to(device),
                     )
                     if logprobs:
                         # dump log probs per file
@@ -198,13 +224,17 @@ class CTCFinetuneModel(ASRModel):
                             hypotheses.append(logits[idx][: logits_len[idx]])
                     else:
                         current_hypotheses = self._wer.ctc_decoder_predictions_tensor(
-                            greedy_predictions, predictions_len=logits_len, return_hypotheses=return_hypotheses,
+                            greedy_predictions,
+                            predictions_len=logits_len,
+                            return_hypotheses=return_hypotheses,
                         )
 
                         if return_hypotheses:
                             # dump log probs per file
                             for idx in range(logits.shape[0]):
-                                current_hypotheses[idx].y_sequence = logits[idx][: logits_len[idx]]
+                                current_hypotheses[idx].y_sequence = logits[idx][
+                                    : logits_len[idx]
+                                ]
 
                         hypotheses += current_hypotheses
 
@@ -241,14 +271,18 @@ class CTCFinetuneModel(ASRModel):
         """
         assert not self.use_bpe
         if self.decoder.vocabulary == new_vocabulary:
-            logging.warning(f"Old {self.decoder.vocabulary} and new {new_vocabulary} match. Not changing anything.")
+            logging.warning(
+                f"Old {self.decoder.vocabulary} and new {new_vocabulary} match. Not changing anything."
+            )
         else:
             if new_vocabulary is None or len(new_vocabulary) == 0:
-                raise ValueError(f'New vocabulary must be non-empty list of chars. But I got: {new_vocabulary}')
+                raise ValueError(
+                    f"New vocabulary must be non-empty list of chars. But I got: {new_vocabulary}"
+                )
             decoder_config = self.decoder.to_config_dict()
             new_decoder_config = copy.deepcopy(decoder_config)
-            new_decoder_config['vocabulary'] = new_vocabulary
-            new_decoder_config['num_classes'] = len(new_vocabulary)
+            new_decoder_config["vocabulary"] = new_vocabulary
+            new_decoder_config["num_classes"] = len(new_vocabulary)
 
             del self.decoder
             self.decoder = CTCFinetuneModel.from_config_dict(new_decoder_config)
@@ -261,7 +295,7 @@ class CTCFinetuneModel(ASRModel):
             self._wer = WER(
                 vocabulary=self.decoder.vocabulary,
                 batch_dim_index=0,
-                use_cer=self._cfg.get('use_cer', False),
+                use_cer=self._cfg.get("use_cer", False),
                 ctc_decode=True,
                 dist_sync_on_step=True,
                 log_prediction=self._cfg.get("log_prediction", False),
@@ -272,37 +306,47 @@ class CTCFinetuneModel(ASRModel):
             self._cfg.decoder = new_decoder_config
             OmegaConf.set_struct(self._cfg.decoder, True)
 
-            logging.info(f"Changed decoder to output to {self.decoder.vocabulary} vocabulary.")
+            logging.info(
+                f"Changed decoder to output to {self.decoder.vocabulary} vocabulary."
+            )
 
-    def _setup_dataloader_from_config(self, config: Optional[Dict], noise_perturb_config):
+    def _setup_dataloader_from_config(
+        self, config: Optional[Dict], noise_perturb_config
+    ):
         if noise_perturb_config is not None:
             noise_perturb = RandomNoisePerturbation(**noise_perturb_config)
             augmentor = AudioAugmentor(perturbations=[(1.0, noise_perturb)])
         else:
             augmentor = None
 
-        shuffle = config['shuffle']
+        shuffle = config["shuffle"]
 
-        if 'manifest_filepath' in config and config['manifest_filepath'] is None:
-            logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
+        if "manifest_filepath" in config and config["manifest_filepath"] is None:
+            logging.warning(
+                f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}"
+            )
             return None
 
         if self.add_end_space:
-            config['parser_add_end_space'] = self.add_end_space
+            config["parser_add_end_space"] = self.add_end_space
 
         if self.use_bpe:
-            dataset = audio_to_text_dataset.get_bpe_dataset(config=config, tokenizer=self.tokenizer, augmentor=augmentor)
+            dataset = audio_to_text_dataset.get_bpe_dataset(
+                config=config, tokenizer=self.tokenizer, augmentor=augmentor
+            )
         else:
-            dataset = audio_to_text_dataset.get_char_dataset(config=config, augmentor=augmentor)
+            dataset = audio_to_text_dataset.get_char_dataset(
+                config=config, augmentor=augmentor
+            )
 
         return torch.utils.data.DataLoader(
             dataset=dataset,
-            batch_size=config['batch_size'],
+            batch_size=config["batch_size"],
             collate_fn=dataset.collate_fn,
-            drop_last=config.get('drop_last', False),
+            drop_last=config.get("drop_last", False),
             shuffle=shuffle,
-            num_workers=config.get('num_workers', 0),
-            pin_memory=config.get('pin_memory', False),
+            num_workers=config.get("num_workers", 0),
+            pin_memory=config.get("pin_memory", False),
         )
 
     def setup_training_data(self, train_data_config: Optional[Union[DictConfig, Dict]]):
@@ -320,25 +364,30 @@ class CTCFinetuneModel(ASRModel):
             -   :class:`~nemo.collections.asr.data.audio_to_text.TarredAudioToBPEDataset`
             -   :class:`~nemo.collections.asr.data.audio_to_text_dali.AudioToCharDALIDataset`
         """
-        if 'shuffle' not in train_data_config:
-            train_data_config['shuffle'] = True
+        if "shuffle" not in train_data_config:
+            train_data_config["shuffle"] = True
 
         # preserve config
-        self._update_dataset_config(dataset_name='train', config=train_data_config)
+        self._update_dataset_config(dataset_name="train", config=train_data_config)
 
-        self._train_dl = self._setup_dataloader_from_config(config=train_data_config, noise_perturb_config=self._cfg['noise_perturb'])
+        self._train_dl = self._setup_dataloader_from_config(
+            config=train_data_config, noise_perturb_config=self._cfg["noise_perturb"]
+        )
 
         # Need to set this because if using an IterableDataset, the length of the dataloader is the total number
         # of samples rather than the number of batches, and this messes up the tqdm progress bar.
         # So we set the number of steps manually (to the correct number) to fix this.
-        if 'is_tarred' in train_data_config and train_data_config['is_tarred']:
+        if "is_tarred" in train_data_config and train_data_config["is_tarred"]:
             # We also need to check if limit_train_batches is already set.
             # If it's an int, we assume that the user has set it to something sane, i.e. <= # training batches,
             # and don't change it. Otherwise, adjust batches accordingly if it's a float (including 1.0).
             if isinstance(self._trainer.limit_train_batches, float):
                 self._trainer.limit_train_batches = int(
                     self._trainer.limit_train_batches
-                    * ceil((len(self._train_dl.dataset) / self.world_size) / train_data_config['batch_size'])
+                    * ceil(
+                        (len(self._train_dl.dataset) / self.world_size)
+                        / train_data_config["batch_size"]
+                    )
                 )
 
     def setup_validation_data(self, val_data_config: Optional[Union[DictConfig, Dict]]):
@@ -356,13 +405,15 @@ class CTCFinetuneModel(ASRModel):
             -   :class:`~nemo.collections.asr.data.audio_to_text.TarredAudioToBPEDataset`
             -   :class:`~nemo.collections.asr.data.audio_to_text_dali.AudioToCharDALIDataset`
         """
-        if 'shuffle' not in val_data_config:
-            val_data_config['shuffle'] = False
+        if "shuffle" not in val_data_config:
+            val_data_config["shuffle"] = False
 
         # preserve config
-        self._update_dataset_config(dataset_name='validation', config=val_data_config)
+        self._update_dataset_config(dataset_name="validation", config=val_data_config)
 
-        self._validation_dl = self._setup_dataloader_from_config(config=val_data_config, noise_perturb_config=None)
+        self._validation_dl = self._setup_dataloader_from_config(
+            config=val_data_config, noise_perturb_config=None
+        )
 
     def setup_test_data(self, test_data_config: Optional[Union[DictConfig, Dict]]):
         """
@@ -379,17 +430,21 @@ class CTCFinetuneModel(ASRModel):
             -   :class:`~nemo.collections.asr.data.audio_to_text.TarredAudioToBPEDataset`
             -   :class:`~nemo.collections.asr.data.audio_to_text_dali.AudioToCharDALIDataset`
         """
-        if 'shuffle' not in test_data_config:
-            test_data_config['shuffle'] = False
+        if "shuffle" not in test_data_config:
+            test_data_config["shuffle"] = False
 
         # preserve config
-        self._update_dataset_config(dataset_name='test', config=test_data_config)
+        self._update_dataset_config(dataset_name="test", config=test_data_config)
 
-        self._test_dl = self._setup_dataloader_from_config(config=test_data_config, noise_perturb_config=None)
+        self._test_dl = self._setup_dataloader_from_config(
+            config=test_data_config, noise_perturb_config=None
+        )
 
     def optim_param_groups(self):
-        return [{'params': self.encoder.parameters(), 'weight_decay': 0.0},
-                {'params': self.decoder.parameters()}]
+        return [
+            {"params": self.encoder.parameters(), "weight_decay": 0.0},
+            {"params": self.decoder.parameters()},
+        ]
 
     def forward(self, input_signal, input_signal_length, global_step):
         """
@@ -400,10 +455,20 @@ class CTCFinetuneModel(ASRModel):
             input_signal_length: Vector of length B, that contains the individual lengths of the audio
                 sequences.
         """
-        ft = False if global_step is None else self.freeze_finetune_updates <= global_step
+        ft = (
+            False
+            if global_step is None
+            else self.freeze_finetune_updates <= global_step
+        )
         with torch.no_grad() if not ft else contextlib.suppress():
-            encoded, encoded_len = self.encoder(input_signal, input_signal_length, None, None,
-                                                   mask=self.training, features_only=True)
+            encoded, encoded_len = self.encoder(
+                input_signal,
+                input_signal_length,
+                None,
+                None,
+                mask=self.training,
+                features_only=True,
+            )
 
         # [B, T, D] => [B, D, T]
         encoded = encoded.transpose(1, 2)
@@ -415,7 +480,9 @@ class CTCFinetuneModel(ASRModel):
         if encoded.shape[2] != max_output_len:
             encoded = encoded.narrow(dim=2, start=0, length=max_output_len).contiguous()
 
-        logits, encoded_len = self.decoder(encoder_output=encoded, lens=encoded_len, log_prob=False)
+        logits, encoded_len = self.decoder(
+            encoder_output=encoded, lens=encoded_len, log_prob=False
+        )
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
 
         with torch.no_grad():
@@ -426,51 +493,75 @@ class CTCFinetuneModel(ASRModel):
     def training_step(self, batch, batch_nb):
         signal, signal_len, transcript, transcript_len = batch
 
-        log_probs, encoded_len, predictions, _ = self(input_signal=signal, input_signal_length=signal_len,
-                                                   global_step=self.trainer.global_step)
-
-        loss_value = self.loss(
-            log_probs=log_probs, targets=transcript, input_lengths=encoded_len, target_lengths=transcript_len
+        log_probs, encoded_len, predictions, _ = self(
+            input_signal=signal,
+            input_signal_length=signal_len,
+            global_step=self.trainer.global_step,
         )
 
-        tensorboard_logs = {'train_loss': loss_value, 'learning_rate': self._optimizer.param_groups[0]['lr']}
+        loss_value = self.loss(
+            log_probs=log_probs,
+            targets=transcript,
+            input_lengths=encoded_len,
+            target_lengths=transcript_len,
+        )
 
-        return {'loss': loss_value, 'log': tensorboard_logs}
+        tensorboard_logs = {
+            "train_loss": loss_value,
+            "learning_rate": self._optimizer.param_groups[0]["lr"],
+        }
+
+        return {"loss": loss_value, "log": tensorboard_logs}
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0, decode_results=None):
         signal, signal_len, transcript, transcript_len = batch
-        log_probs, encoded_len, predictions, logits = self(input_signal=signal, input_signal_length=signal_len, global_step=None)
+        log_probs, encoded_len, predictions, logits = self(
+            input_signal=signal, input_signal_length=signal_len, global_step=None
+        )
 
         loss_value = self.loss(
-            log_probs=log_probs, targets=transcript, input_lengths=encoded_len, target_lengths=transcript_len
+            log_probs=log_probs,
+            targets=transcript,
+            input_lengths=encoded_len,
+            target_lengths=transcript_len,
         )
         self._wer.update(
-            predictions=predictions, targets=transcript, target_lengths=transcript_len, predictions_lengths=encoded_len,
-            log_prediction=batch_idx < 3, decode_results=decode_results)
+            predictions=predictions,
+            targets=transcript,
+            target_lengths=transcript_len,
+            predictions_lengths=encoded_len,
+            log_prediction=batch_idx < 3,
+            decode_results=decode_results,
+        )
         wer, wer_num, wer_denom = self._wer.compute()
         return {
-            'val_loss': loss_value,
-            'val_wer_num': wer_num,
-            'val_wer_denom': wer_denom,
-            'val_wer': wer,
-            'val_logprob': log_probs.cpu().numpy(),
-            'val_logprob_len': encoded_len.cpu().numpy(),
-            'val_logits': logits.cpu().numpy(),
+            "val_loss": loss_value,
+            "val_wer_num": wer_num,
+            "val_wer_denom": wer_denom,
+            "val_wer": wer,
+            "val_logprob": log_probs.cpu().numpy(),
+            "val_logprob_len": encoded_len.cpu().numpy(),
+            "val_logits": logits.cpu().numpy(),
         }
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         decode_results = {}
-        logs = self.validation_step(batch, batch_idx, dataloader_idx=dataloader_idx, decode_results=decode_results)
+        logs = self.validation_step(
+            batch,
+            batch_idx,
+            dataloader_idx=dataloader_idx,
+            decode_results=decode_results,
+        )
         test_logs = {
-            'test_loss': logs['val_loss'],
-            'test_wer_num': logs['val_wer_num'],
-            'test_wer_denom': logs['val_wer_denom'],
-            'test_wer': logs['val_wer'],
-            'test_references': decode_results['references'],
-            'test_hypotheses': decode_results['hypotheses'],
-            'test_logprob': logs['val_logprob'],
-            'test_logprob_len': logs['val_logprob_len'],
-            'test_logits': logs['val_logits'],
+            "test_loss": logs["val_loss"],
+            "test_wer_num": logs["val_wer_num"],
+            "test_wer_denom": logs["val_wer_denom"],
+            "test_wer": logs["val_wer"],
+            "test_references": decode_results["references"],
+            "test_hypotheses": decode_results["hypotheses"],
+            "test_logprob": logs["val_logprob"],
+            "test_logprob_len": logs["val_logprob_len"],
+            "test_logits": logs["val_logits"],
         }
         return test_logs
 
@@ -478,7 +569,9 @@ class CTCFinetuneModel(ASRModel):
         if self._test_dl is not None:
             return self._test_dl
 
-    def _setup_transcribe_dataloader(self, config: Dict) -> 'torch.utils.data.DataLoader':
+    def _setup_transcribe_dataloader(
+        self, config: Dict
+    ) -> "torch.utils.data.DataLoader":
         """
         Setup function for a temporary data loader which wraps the provided audio file.
 
@@ -496,34 +589,40 @@ class CTCFinetuneModel(ASRModel):
         """
         assert not self.use_bpe
         dl_config = {
-            'manifest_filepath': os.path.join(config['temp_dir'], 'manifest.json'),
-            'sample_rate': self.preprocessor._sample_rate,
-            'labels': self.decoder.vocabulary,
-            'batch_size': min(config['batch_size'], len(config['paths2audio_files'])),
-            'trim_silence': True,
-            'shuffle': False,
+            "manifest_filepath": os.path.join(config["temp_dir"], "manifest.json"),
+            "sample_rate": self.preprocessor._sample_rate,
+            "labels": self.decoder.vocabulary,
+            "batch_size": min(config["batch_size"], len(config["paths2audio_files"])),
+            "trim_silence": True,
+            "shuffle": False,
         }
 
-        temporary_datalayer = self._setup_dataloader_from_config(config=DictConfig(dl_config), noise_perturb_config=None)
+        temporary_datalayer = self._setup_dataloader_from_config(
+            config=DictConfig(dl_config), noise_perturb_config=None
+        )
         return temporary_datalayer
 
     @classmethod
     def init_encoder_from_pretrain_model(
-            cls,
-            encoder,
-            encoder_param_prefix,
-            checkpoint_path,
-            *,
-            map_location=None,
-            strict: bool=True):
+        cls,
+        encoder,
+        encoder_param_prefix,
+        checkpoint_path,
+        *,
+        map_location=None,
+        strict: bool = True,
+    ):
         try:
             cls._set_model_restore_state(is_being_restored=True)
 
             from pytorch_lightning.utilities.cloud_io import load as pl_load
+
             if map_location is not None:
                 checkpoint = pl_load(checkpoint_path, map_location=map_location)
             else:
-                checkpoint = pl_load(checkpoint_path, map_location=lambda storage, loc: storage)
+                checkpoint = pl_load(
+                    checkpoint_path, map_location=lambda storage, loc: storage
+                )
 
             # for past checkpoint need to add the new key
             assert cls.CHECKPOINT_HYPER_PARAMS_KEY in checkpoint
@@ -534,22 +633,36 @@ class CTCFinetuneModel(ASRModel):
 
             # load the state_dict on the model automatically
             if encoder_param_prefix is not None:
-                encoder_state = {k[len(encoder_param_prefix):]: v for k, v in checkpoint['state_dict'].items() if k.startswith(encoder_param_prefix)}
+                encoder_state = {
+                    k[len(encoder_param_prefix) :]: v
+                    for k, v in checkpoint["state_dict"].items()
+                    if k.startswith(encoder_param_prefix)
+                }
             else:
-                encoder_state = checkpoint['state_dict']
+                encoder_state = checkpoint["state_dict"]
             encoder.load_state_dict(encoder_state, strict=strict)
         finally:
             cls._set_model_restore_state(is_being_restored=False)
 
     def multi_test_epoch_end(self, outputs, dataloader_idx: int = 0):
-        val_loss_mean = torch.stack([x['test_loss'] for x in outputs]).mean()
-        wer_num = torch.stack([x['test_wer_num'] for x in outputs]).sum()
-        wer_denom = torch.stack([x['test_wer_denom'] for x in outputs]).sum()
-        tensorboard_logs = {'test_loss': val_loss_mean, 'test_wer': wer_num / wer_denom}
-        references = itertools.chain.from_iterable([x['test_references'] for x in outputs])
-        hypotheses = itertools.chain.from_iterable([x['test_hypotheses'] for x in outputs])
-        test_logprob = [x['test_logprob'] for x in outputs]
-        test_logprob_len = [x['test_logprob_len'] for x in outputs]
-        test_logits = [x['test_logits'] for x in outputs]
-        return {'test_loss': val_loss_mean, 'log': tensorboard_logs, 'decode_results': (references, hypotheses),
-                'test_logprob': test_logprob, 'test_logprob_len': test_logprob_len, 'test_logits': test_logits}
+        val_loss_mean = torch.stack([x["test_loss"] for x in outputs]).mean()
+        wer_num = torch.stack([x["test_wer_num"] for x in outputs]).sum()
+        wer_denom = torch.stack([x["test_wer_denom"] for x in outputs]).sum()
+        tensorboard_logs = {"test_loss": val_loss_mean, "test_wer": wer_num / wer_denom}
+        references = itertools.chain.from_iterable(
+            [x["test_references"] for x in outputs]
+        )
+        hypotheses = itertools.chain.from_iterable(
+            [x["test_hypotheses"] for x in outputs]
+        )
+        test_logprob = [x["test_logprob"] for x in outputs]
+        test_logprob_len = [x["test_logprob_len"] for x in outputs]
+        test_logits = [x["test_logits"] for x in outputs]
+        return {
+            "test_loss": val_loss_mean,
+            "log": tensorboard_logs,
+            "decode_results": (references, hypotheses),
+            "test_logprob": test_logprob,
+            "test_logprob_len": test_logprob_len,
+            "test_logits": test_logits,
+        }
